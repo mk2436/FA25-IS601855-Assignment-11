@@ -1,4 +1,3 @@
-# app/schemas/calculation.py
 """
 Calculation Pydantic Schemas
 
@@ -22,10 +21,10 @@ from pydantic import (
     BaseModel,
     Field,
     ConfigDict,
-    model_validator,
-    field_validator
+    field_validator,
+    model_validator
 )
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 from datetime import datetime
 
@@ -54,21 +53,25 @@ class CalculationBase(BaseModel):
     Base schema for calculation data.
     
     This schema defines the common fields that all calculation requests share.
-    It's used as a base for more specific schemas (Create, Update, Response).
+    It's used as a base for more specific schemas (Create, Update, Read).
     
-    Design Pattern: This follows the DRY (Don't Repeat Yourself) principle by
-    defining common fields once and reusing them in other schemas.
+    Design Pattern: DRY (Don't Repeat Yourself) — common fields and validators
+    are defined once and re-used in other schemas.
     """
+    a: float = Field(
+        ...,
+        description="First numeric operand for the calculation",
+        examples=[10.5]
+    )
+    b: float = Field(
+        ...,
+        description="Second numeric operand for the calculation",
+        examples=[3.0]
+    )
     type: CalculationType = Field(
         ...,
         description="Type of calculation to perform",
         examples=["addition"]
-    )
-    inputs: List[float] = Field(
-        ...,
-        description="List of numeric inputs for the calculation",
-        examples=[[10.5, 3, 2]],
-        min_length=2
     )
 
     @field_validator("type", mode="before")
@@ -90,50 +93,44 @@ class CalculationBase(BaseModel):
         Raises:
             ValueError: If the type is not a valid calculation type
         """
+        if isinstance(v, str):
+            v = v.lower()
         allowed = {e.value for e in CalculationType}
-        # Ensure v is a string and check (in lowercase) if it's allowed.
-        if not isinstance(v, str) or v.lower() not in allowed:
+        if v not in allowed:
             raise ValueError(
                 f"Type must be one of: {', '.join(sorted(allowed))}"
             )
-        return v.lower()
+        return v
 
-    @field_validator("inputs", mode="before")
+    @field_validator("a", "b", mode="before")
     @classmethod
-    def check_inputs_is_list(cls, v):
+    def validate_float(cls, v):
         """
-        Validate that inputs is a list.
-        
-        This validator provides a clearer error message than Pydantic's
-        default validation when inputs is not a list.
+        Validate that the input is a valid float.
         
         Args:
             v: The value to validate
             
         Returns:
-            The validated list
+            The validated value
             
         Raises:
-            ValueError: If inputs is not a list
+            ValueError: If the input is not a valid float
         """
-        if not isinstance(v, list):
-            raise ValueError("Input should be a valid list")
+        if not isinstance(v, (float, int)):
+            raise ValueError("Input should be a valid float")
         return v
 
-    @model_validator(mode='after')
-    def validate_inputs(self) -> "CalculationBase":
+    @model_validator(mode="after")
+    def validate_operands(self) -> "CalculationBase":
         """
-        Validate inputs based on calculation type.
-        
-        This is a model validator that runs AFTER all fields are validated.
-        It can access multiple fields (self.type and self.inputs) to perform
-        cross-field validation.
+        Cross-field validation for operands.
         
         Business Rules:
-        1. All calculations require at least 2 inputs
-        2. Division cannot have zero in denominators (positions 1+)
+        1. Both operands 'a' and 'b' must be provided
+        2. Division cannot have a zero divisor ('b')
         
-        This demonstrates LBYL (Look Before You Leap) - we validate before
+        This demonstrates LBYL (Look Before You Leap) by validating before
         attempting the operation.
         
         Returns:
@@ -142,22 +139,23 @@ class CalculationBase(BaseModel):
         Raises:
             ValueError: If validation fails
         """
-        if len(self.inputs) < 2:
-            raise ValueError(
-                "At least two numbers are required for calculation"
-            )
-        if self.type == CalculationType.DIVISION:
-            # Prevent division by zero (skip first value as numerator)
-            if any(x == 0 for x in self.inputs[1:]):
-                raise ValueError("Cannot divide by zero")
+        # Ensure both operands exist
+        if self.a is None or self.b is None:
+            raise ValueError("Both operands 'a' and 'b' must be provided")
+        
+        # Check for division by zero
+        if self.type == CalculationType.DIVISION and self.b == 0:
+            raise ValueError("Cannot divide by zero")
+        
         return self
+
 
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
             "examples": [
-                {"type": "addition", "inputs": [10.5, 3, 2]},
-                {"type": "division", "inputs": [100, 2]}
+                {"a": 10.5, "b": 3.0, "type": "addition"},
+                {"a": 100.0, "b": 2.0, "type": "division"}
             ]
         }
     )
@@ -182,8 +180,9 @@ class CalculationCreate(CalculationBase):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
+                "a": 10.5,
+                "b": 3.0,
                 "type": "addition",
-                "inputs": [10.5, 3, 2],
                 "user_id": "123e4567-e89b-12d3-a456-426614174000"
             }
         }
@@ -194,52 +193,61 @@ class CalculationUpdate(BaseModel):
     """
     Schema for updating an existing Calculation.
     
-    This schema allows clients to update the inputs of an existing
+    This schema allows clients to update the operands of an existing
     calculation. All fields are optional since partial updates are allowed.
     
     Note: The calculation type cannot be changed after creation. If you need
     a different type, create a new calculation.
     """
-    inputs: Optional[List[float]] = Field(
+    a: Optional[float] = Field(
         None,
-        description="Updated list of numeric inputs for the calculation",
-        examples=[[42, 7]],
-        min_length=2
+        description="Updated first numeric operand",
+        examples=[42.0]
+    )
+    b: Optional[float] = Field(
+        None,
+        description="Updated second numeric operand",
+        examples=[7.0]
     )
 
-    @model_validator(mode='after')
-    def validate_inputs(self) -> "CalculationUpdate":
+    @model_validator(mode="after")
+    def validate_operands(self) -> "CalculationUpdate":
         """
-        Validate the inputs if they are being updated.
-        
-        Returns:
-            self: The validated model instance
-            
+        Validate updated operands.
+
+        Business Rules:
+        1. Both operands must be provided.
+        2. Division cannot have a zero divisor (`b`).
+
         Raises:
-            ValueError: If inputs has fewer than 2 numbers
+            ValueError: If validation fails.
         """
-        if self.inputs is not None and len(self.inputs) < 2:
-            raise ValueError(
-                "At least two numbers are required for calculation"
-            )
+        # Ensure both operands are provided
+        if self.a is None or self.b is None:
+            raise ValueError("Both operands 'a' and 'b' must be provided for update")
+
+        # Prevent division by zero
+        if getattr(self, "type", None) == CalculationType.DIVISION and self.b == 0:
+            raise ValueError("Cannot divide by zero")
+
         return self
 
     model_config = ConfigDict(
         from_attributes=True,
-        json_schema_extra={"example": {"inputs": [42, 7]}}
+        json_schema_extra={"example": {"a": 42.0, "b": 7.0}}
     )
 
 
-class CalculationResponse(CalculationBase):
+class CalculationRead(CalculationBase):
     """
     Schema for reading a Calculation from the database.
     
     This schema includes all the fields that are returned when reading
-    a calculation, including database-generated fields like id, created_at,
+    a calculation, including database-generated fields like id, timestamps,
     and the computed result.
     
     The from_attributes=True config allows this schema to be populated from
-    SQLAlchemy model instances using model.from_orm(db_calculation).
+    ORM instances using model.from_orm(db_calculation).
     """
     id: UUID = Field(
         ...,
@@ -251,6 +259,11 @@ class CalculationResponse(CalculationBase):
         description="UUID of the user who owns this calculation",
         examples=["123e4567-e89b-12d3-a456-426614174000"]
     )
+    result: float = Field(
+        ...,
+        description="Result of the calculation",
+        examples=[13.5]
+    )
     created_at: datetime = Field(
         ...,
         description="Time when the calculation was created"
@@ -259,11 +272,6 @@ class CalculationResponse(CalculationBase):
         ...,
         description="Time when the calculation was last updated"
     )
-    result: float = Field(
-        ...,
-        description="Result of the calculation",
-        examples=[15.5]
-    )
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -271,9 +279,10 @@ class CalculationResponse(CalculationBase):
             "example": {
                 "id": "123e4567-e89b-12d3-a456-426614174999",
                 "user_id": "123e4567-e89b-12d3-a456-426614174000",
+                "a": 10.5,
+                "b": 3.0,
                 "type": "addition",
-                "inputs": [10.5, 3, 2],
-                "result": 15.5,
+                "result": 13.5,
                 "created_at": "2025-01-01T00:00:00",
                 "updated_at": "2025-01-01T00:00:00"
             }
