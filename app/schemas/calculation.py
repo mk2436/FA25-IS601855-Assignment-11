@@ -104,22 +104,27 @@ class CalculationBase(BaseModel):
 
     @field_validator("a", "b", mode="before")
     @classmethod
-    def validate_float(cls, v):
+    def validate_operand_exists_and_float(cls, v):
         """
-        Validate that the input is a valid float.
-        
+        Validate that the operand exists and is a valid float.
+
+        This runs BEFORE Pydantic's standard validation.
+
         Args:
             v: The value to validate
-            
+
         Returns:
             The validated value
-            
+
         Raises:
-            ValueError: If the input is not a valid float
+            ValueError: If the input is None or not a valid float
         """
+        if v is None:
+            raise ValueError("Both operands 'a' and 'b' must be provided")
         if not isinstance(v, (float, int)):
             raise ValueError("Input should be a valid float")
         return v
+
 
     @model_validator(mode="after")
     def validate_operands(self) -> "CalculationBase":
@@ -127,7 +132,6 @@ class CalculationBase(BaseModel):
         Cross-field validation for operands.
         
         Business Rules:
-        1. Both operands 'a' and 'b' must be provided
         2. Division cannot have a zero divisor ('b')
         
         This demonstrates LBYL (Look Before You Leap) by validating before
@@ -139,9 +143,6 @@ class CalculationBase(BaseModel):
         Raises:
             ValueError: If validation fails
         """
-        # Ensure both operands exist
-        if self.a is None or self.b is None:
-            raise ValueError("Both operands 'a' and 'b' must be provided")
         
         # Check for division by zero
         if self.type == CalculationType.DIVISION and self.b == 0:
@@ -209,6 +210,13 @@ class CalculationUpdate(BaseModel):
         description="Updated second numeric operand",
         examples=[7.0]
     )
+
+    type: Optional[CalculationType] = Field(
+        None,
+        description="Type of calculation to perform",
+        examples=["addition"]
+    )
+
 
     @model_validator(mode="after")
     def validate_operands(self) -> "CalculationUpdate":

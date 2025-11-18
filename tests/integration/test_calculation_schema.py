@@ -54,6 +54,19 @@ def test_calculation_base_valid_addition():
     assert calc.b == 3
 
 
+@pytest.mark.parametrize(
+    "a, b, type",
+    [
+        (None, 5, CalculationType.ADDITION),   # 'a' is None
+        (5, None, CalculationType.DIVISION),   # 'b' is None
+        (None, None, CalculationType.ADDITION), # both None
+        (None, None, CalculationType.DIVISION) # both None
+    ]
+)
+def test_operands_must_exist(a, b, type):
+    with pytest.raises(ValueError, match="Both operands 'a' and 'b' must be provided"):
+        CalculationBase(a=a, b=b, type=type)
+
 def test_calculation_base_valid_subtraction():
     """Test CalculationBase with valid subtraction data."""
     data = {
@@ -239,6 +252,18 @@ def test_calculation_update_insufficient_inputs():
     assert len(exc_info.value.errors()) > 0
 
 
+@pytest.mark.parametrize(
+    "a, b",
+    [
+        (5, 0),   
+        (3, 0),
+    ]
+)
+def test_division_by_zero(a, b):
+    with pytest.raises(ValueError, match="Cannot divide by zero"):
+        CalculationUpdate(a=a, b=b, type=CalculationType.DIVISION)
+
+        
 # ============================================================================
 # Tests for CalculationRead Schema
 # ============================================================================
